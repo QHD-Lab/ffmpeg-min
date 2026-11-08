@@ -15,7 +15,7 @@ fetch() {
   local file="$DL/${1##*/}"
   mkdir -p "$DL"
   if [ ! -f "$file" ]; then
-    curl -fsSL --retry 3 -o "$file.part" "$1"
+    curl -fsSL --retry 3 --retry-all-errors -o "$file.part" "$1"
     mv "$file.part" "$file"
   fi
   local got; got=$(sha256 "$file")
