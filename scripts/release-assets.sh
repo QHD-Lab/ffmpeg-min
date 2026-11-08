@@ -23,7 +23,9 @@ tar -xJOf "$DL/${FFMPEG_URL##*/}" "ffmpeg-$FFMPEG_VERSION/COPYING.LGPLv2.1" > "$
 tar -xzOf "$DL/${OPUS_URL##*/}" "opus-$OPUS_VERSION/COPYING" > "$dist/LICENSE-opus.txt"
 # The Linux binaries link musl statically (MIT); its notice must travel with them.
 cp "$ROOT/licenses/musl-COPYRIGHT" "$dist/LICENSE-musl.txt"
-# Build scripts and versions for this tag (no patches are applied to either source).
+# The one FFmpeg patch (libopus is unpatched); also inside the build scripts archive.
+cp "$ROOT"/patches/*.patch "$dist/"
+# Build scripts and versions for this tag.
 git -C "$ROOT" archive --format=tar.gz --prefix="ffmpeg-min-$tag/" -o "$dist/ffmpeg-min-$tag-build-scripts.tar.gz" HEAD
 
 (cd "$dist" && sha256sum -- * > SHA256SUMS)

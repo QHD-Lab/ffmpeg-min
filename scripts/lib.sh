@@ -55,6 +55,10 @@ build() {
   fetch "$FFMPEG_URL" "$FFMPEG_SHA256"
   tar -xzf "$DL/${OPUS_URL##*/}" -C "$work/src"
   tar -xJf "$DL/${FFMPEG_URL##*/}" -C "$work/src"
+  for p in "$ROOT"/patches/*.patch; do
+    echo "== applying ${p##*/}"
+    patch -p1 -d "$work/src/ffmpeg-$FFMPEG_VERSION" < "$p"
+  done
 
   echo "== libopus $OPUS_VERSION ($platform)"
   # ${a[@]+"${a[@]}"}: macOS bash 3.2 treats an empty array as unset under set -u.
@@ -67,7 +71,7 @@ build() {
   # PKG_CONFIG_LIBDIR keeps configure from finding anything but our libopus.
   (cd "$work/src/ffmpeg-$FFMPEG_VERSION" &&
     PKG_CONFIG_LIBDIR="$prefix/lib/pkgconfig" ./configure \
-      --pkg-config=pkg-config --pkg-config-flags=--static \
+      --pkg-config=pkg-config --pkg-config-flags=--static --extra-version=icrew.1 \
       "${FFMPEG_COMPONENTS[@]}" ${ff_args[@]+"${ff_args[@]}"} &&
     make -j"$JOBS")
 

@@ -10,7 +10,8 @@ trap 'kill $(jobs -p) 2>/dev/null || true' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ff() { "$FF" -hide_banner -nostdin "$@"; }
 
-ff -version | sed -n 1p
+version=$(ff -version | sed -n 1p); echo "$version"
+case $version in *-icrew.*) ;; *) fail "not the patched build (no -icrew.N in the version)" ;; esac
 conf=$(ff -buildconf)
 case $conf in *--enable-gpl*|*--enable-nonfree*|*--enable-version3*) fail "non-LGPL configure flag: $conf" ;; esac
 ff -L > "$TMP/license"
@@ -33,19 +34,42 @@ for f in ac3 mp2; do
 done
 echo "ok   ac3.mp4 and mp2.mp4 -> libopus"
 
+# patches/0001-rtsp-auth_file.patch: the option exists on both sides and bad input fails.
+for side in demuxer muxer; do
+  ff -h $side=rtsp > "$TMP/h-$side" 2>&1
+  grep -q -- "-auth_file" "$TMP/h-$side" || fail "rtsp $side has no auth_file option"
+done
+NOWHERE=rtsp://127.0.0.1:1/x
+printf '\n' > "$TMP/empty"
+# expect_auth_error <message> <ffmpeg args...>: must exit non-zero because of auth_file.
+expect_auth_error() {
+  local want=$1; shift
+  if ff "$@" > "$TMP/auth-err.log" 2>&1; then fail "auth_file case succeeded: $*"; fi
+  grep -q "$want" "$TMP/auth-err.log" || { cat "$TMP/auth-err.log"; fail "auth_file case gave the wrong error: $*"; }
+}
+expect_auth_error "Could not open auth_file" -auth_file "$TMP/missing" -i $NOWHERE -f null -
+expect_auth_error "Could not open auth_file" -auth_file http://127.0.0.1:1/auth -i $NOWHERE -f null -
+expect_auth_error "auth_file must hold" -i ac3.mp4 -c copy -auth_file "$TMP/empty" -f rtsp $NOWHERE
+echo "ok   auth_file: on rtsp demuxer and muxer; missing, empty and non-file/pipe sources fail"
+
 IN=rtsp://127.0.0.1:18554/pgm-in OUT=rtsp://127.0.0.1:18555/pgm-out
+# Both publishers get their credential the way iCrew passes it: on an inherited pipe, fd 3.
+# (Listen mode does not check it; this proves it is read without breaking the stream.)
+SECRET=icrew-ffmpeg:smoke-$$-secret
 ff -rtsp_flags listen -listen_timeout 30 -i $OUT -c copy -f null - > "$TMP/view.log" 2>&1 & view=$!
 sleep 2
 ff -rtsp_flags listen -listen_timeout 30 -i $IN -map 0:v:0 -map 0:a:0 -c:v copy \
   -c:a libopus -ar 48000 -ac 2 -b:a 96k -application lowdelay -frame_duration 20 \
-  -rtsp_transport tcp -f rtsp $OUT > "$TMP/bridge.log" 2>&1 & bridge=$!
+  -rtsp_transport tcp -auth_file pipe:3 -f rtsp $OUT > "$TMP/bridge.log" 2>&1 3< <(echo "$SECRET") & bridge=$!
 sleep 2
-ff -re -i h264-aac.mp4 -c copy -rtsp_transport tcp -f rtsp $IN > "$TMP/pub.log" 2>&1 || { cat "$TMP/pub.log"; fail "publish"; }
+ff -re -i h264-aac.mp4 -c copy -rtsp_transport tcp -auth_file pipe:3 -f rtsp $IN > "$TMP/pub.log" 2>&1 3< <(echo "$SECRET") \
+  || { cat "$TMP/pub.log"; fail "publish"; }
 wait $bridge || { cat "$TMP/bridge.log"; fail "bridge exited with an error"; }
 wait $view || { cat "$TMP/view.log"; fail "viewer exited with an error"; }
 grep -q "Video: h264" "$TMP/view.log" && grep -q "Audio: opus, 48000 Hz, stereo" "$TMP/view.log" \
   || { cat "$TMP/view.log"; fail "pgm-out is not H264 + Opus"; }
 frames=$(grep -o "frame= *[0-9]*" "$TMP/view.log" | tail -1 | tr -dc 0-9)
 [ "${frames:-0}" -ge 55 ] || { cat "$TMP/view.log"; fail "pgm-out got only ${frames:-0} of 60 video frames"; }
-echo "ok   RTSP: H264+AAC in -> H264 (copy) + Opus 48 kHz stereo out, $frames video frames"
+! grep -l "smoke-$$-secret" "$TMP"/*.log || fail "the auth_file credential leaked into a log"
+echo "ok   RTSP: H264+AAC in -> H264 (copy) + Opus 48 kHz stereo out, $frames video frames; credential via pipe:3, not logged"
 echo "PASS"

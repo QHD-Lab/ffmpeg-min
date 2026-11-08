@@ -93,4 +93,4 @@ jobs:
           case $GITHUB_REF_NAME in *-*) prerelease=--prerelease ;; esac
           gh release create "$GITHUB_REF_NAME" dist/* -R "$GITHUB_REPOSITORY" --verify-tag $prerelease \
             --title "$GITHUB_REF_NAME (FFmpeg $FFMPEG_VERSION, libopus $OPUS_VERSION)" \
-            --notes "Minimal LGPL-2.1 FFmpeg $FFMPEG_VERSION builds with libopus $OPUS_VERSION, built from the source tarballs attached here by the scripts in ffmpeg-min-$GITHUB_REF_NAME-build-scripts.tar.gz. No patches. Per-platform configure lines are in ffmpeg-<platform>.configure.txt. See README for how to rebuild and replace the binary."
+            --notes "Minimal LGPL-2.1 FFmpeg $FFMPEG_VERSION builds with libopus $OPUS_VERSION, built from the source tarballs attached here by the scripts in ffmpeg-min-$GITHUB_REF_NAME-build-scripts.tar.gz. One patch, 0001-rtsp-auth_file.patch (attached; adds the RTSP option auth_file so the credential stays off the command line). Per-platform configure lines are in ffmpeg-<platform>.configure.txt. See README for how to rebuild and replace the binary."

@@ -1,0 +1,72 @@
+ffmpeg-min patch 0001, 2026-11-09: RTSP option auth_file
+
+Adds the RTSP muxer/demuxer option -auth_file <file|pipe:N>. The RTSP
+user:password is read from that private file or inherited pipe instead of
+the URL, so the credential never appears in the command line that other
+local users can list (ps, /proc/<pid>/cmdline). Only the file and pipe
+protocols may be opened; trailing newlines are stripped; a missing, empty
+or over-long (>127 bytes) credential is an error. The value is never logged.
+It is read once per connect, before the redirect loop, so cross-origin
+redirects still drop the credential as upstream does. A user:password in
+the URL, if any, still takes precedence.
+
+Applies to FFmpeg 9.0.2 with: patch -p1
+Changed files: libavformat/rtsp.c, libavformat/rtsp.h (LGPL 2.1 section 2a:
+both carry a dated notice next to each change).
+
+--- a/libavformat/rtsp.h
++++ b/libavformat/rtsp.h
+@@ -437,6 +437,10 @@
+      */
+     char *user_agent;
+ 
++    /** ffmpeg-min 2026-11-09: "user:password" read from this file or pipe:N
++     *  (option auth_file) instead of the URL, so it never shows in the command line */
++    char *auth_file;
++
+     char default_lang[4];
+     int buffer_size;
+     int pkt_size;
+--- a/libavformat/rtsp.c
++++ b/libavformat/rtsp.c
+@@ -104,6 +104,7 @@
+     { "timeout", "set timeout (in microseconds) of socket I/O operations", OFFSET(stimeout), AV_OPT_TYPE_INT64, {.i64 = 0}, INT_MIN, INT64_MAX, DEC },
+     COMMON_OPTS(),
+     { "user_agent", "override User-Agent header", OFFSET(user_agent), AV_OPT_TYPE_STRING, {.str = LIBAVFORMAT_IDENT}, 0, 0, DEC },
++    { "auth_file", "read the RTSP user:password from this file or pipe:N instead of the URL", OFFSET(auth_file), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, DEC|ENC },
+ 
+     // TLS options
+     FF_TLS_CLIENT_OPTIONS(RTSPState, tls_opts),
+@@ -1917,6 +1918,32 @@
+         return AVERROR(EINVAL);
+     }
+ 
++    if (rt->auth_file) {
++        /* ffmpeg-min 2026-11-09: the credential comes from a private file or an
++         * inherited pipe, never from the URL, so it is not in the command line.
++         * Read once, before the redirect loop: a pipe cannot be read twice, and a
++         * cross-origin redirect must keep clearing rt->auth. */
++        AVIOContext *pb = NULL;
++        int n;
++        err = ffio_open_whitelist(&pb, rt->auth_file, AVIO_FLAG_READ,
++                                  &s->interrupt_callback, NULL, "file,pipe", NULL);
++        if (err < 0) {
++            av_log(s, AV_LOG_ERROR, "Could not open auth_file\n");
++            return err;
++        }
++        n = avio_read(pb, (unsigned char *)rt->auth, sizeof(rt->auth));
++        avio_closep(&pb);
++        while (n > 0 && (rt->auth[n - 1] == '\n' || rt->auth[n - 1] == '\r'))
++            n--;
++        if (n <= 0 || n >= (int)sizeof(rt->auth)) {
++            memset(rt->auth, 0, sizeof(rt->auth));
++            av_log(s, AV_LOG_ERROR, "auth_file must hold user:password, 1 to %d bytes\n",
++                   (int)sizeof(rt->auth) - 1);
++            return n < 0 ? n : AVERROR(EINVAL);
++        }
++        rt->auth[n] = '\0';
++    }
++
+     if (!ff_network_init())
+         return AVERROR(EIO);
+ 
