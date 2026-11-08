@@ -21,6 +21,8 @@ fetch "$OPUS_URL" "$OPUS_SHA256"
 cp "$DL/${FFMPEG_URL##*/}" "$DL/${OPUS_URL##*/}" "$dist/"
 tar -xJOf "$DL/${FFMPEG_URL##*/}" "ffmpeg-$FFMPEG_VERSION/COPYING.LGPLv2.1" > "$dist/COPYING.LGPLv2.1"
 tar -xzOf "$DL/${OPUS_URL##*/}" "opus-$OPUS_VERSION/COPYING" > "$dist/LICENSE-opus.txt"
+# The Linux binaries link musl statically (MIT); its notice must travel with them.
+cp "$ROOT/licenses/musl-COPYRIGHT" "$dist/LICENSE-musl.txt"
 # Build scripts and versions for this tag (no patches are applied to either source).
 git -C "$ROOT" archive --format=tar.gz --prefix="ffmpeg-min-$tag/" -o "$dist/ffmpeg-min-$tag-build-scripts.tar.gz" HEAD
 

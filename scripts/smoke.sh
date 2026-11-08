@@ -10,7 +10,7 @@ trap 'kill $(jobs -p) 2>/dev/null || true' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ff() { "$FF" -hide_banner -nostdin "$@"; }
 
-ff -version | head -1
+ff -version | sed -n 1p
 conf=$(ff -buildconf)
 case $conf in *--enable-gpl*|*--enable-nonfree*|*--enable-version3*) fail "non-LGPL configure flag: $conf" ;; esac
 ff -L > "$TMP/license"

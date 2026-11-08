@@ -23,4 +23,5 @@ SOFTWARE.
 This license covers the build scripts in this repository only. The FFmpeg
 binaries built by them are licensed under the GNU LGPL version 2.1 or later
 (see COPYING.LGPLv2.1 in each Release); libopus inside them is under its own
-BSD-style license (LICENSE-opus.txt in each Release).
+BSD-style license (LICENSE-opus.txt in each Release), and musl inside the
+Linux binaries under the MIT license (LICENSE-musl.txt in each Release).

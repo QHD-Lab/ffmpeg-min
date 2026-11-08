@@ -27,16 +27,17 @@ iCrew 把切换台的 PGM 经 mediamtx 发给手机。手机和浏览器的 WebR
 
 | 平台 | 构建方式 | 链接 |
 |---|---|---|
-| linux-amd64、linux-arm64 | 各自的 Linux 机器上用 gcc 编 | 全静态 |
+| linux-amd64、linux-arm64 | 各自架构的 Linux 机器上，在 `versions.env` 钉死的 Alpine 容器里用 gcc 编 | 全静态，C 库是 musl（MIT），不含 glibc |
 | darwin-amd64、darwin-arm64 | 各自的 Mac 上用 clang 编，最低 macOS 11 | 只静态链 libopus，系统库动态 |
 | windows-amd64 | Linux 上用 mingw-w64 交叉编译 | 全静态，只依赖 Windows 自带 DLL |
 
 ## 许可
 
 - 构建脚本（本仓库的文件）：MIT，见 [LICENSE](LICENSE)。
-- 二进制：FFmpeg 按 LGPL 2.1 或更高版本授权，`ffmpeg -L` 会显示；里面静态链入的 libopus 按 BSD 式许可。
+- 二进制：FFmpeg 按 LGPL 2.1 或更高版本授权，`ffmpeg -L` 会显示；里面静态链入的 libopus 按 BSD 式许可，Linux 版静态链入的 musl 按 MIT 许可。
+  Linux 版特意不用 glibc：glibc 也是 LGPL，静态链进来就得另附 glibc 的对应源码和重建材料。
 - 每个 Release 里同时放着：五个二进制和各自的 `.sha256`、对应的 FFmpeg 和 libopus 原始源码包、构建脚本包、
-  各平台 configure 行、`COPYING.LGPLv2.1`、`LICENSE-opus.txt`、`SHA256SUMS`。
+  各平台 configure 行、`COPYING.LGPLv2.1`、`LICENSE-opus.txt`、`LICENSE-musl.txt`、`SHA256SUMS`。
 
 按 [FFmpeg 法律页](https://ffmpeg.org/legal.html) 的要求：不用 `--enable-gpl`、`--enable-nonfree`；
 源码和二进制放在同一处（同一个 GitHub Release）；没有修改 FFmpeg 源码；程序名保持 `ffmpeg`；
@@ -47,14 +48,15 @@ iCrew 把切换台的 PGM 经 mediamtx 发给手机。手机和浏览器的 WebR
 
 ## 自己重建和替换
 
-需要 bash、curl、make、pkg-config 和 C 编译器（Linux 用 gcc，macOS 用 Xcode 命令行工具，Windows 版在 Linux 上装 `gcc-mingw-w64-x86-64`）。
+需要 bash、curl、make、pkg-config 和 C 编译器：Linux 版只要 docker（脚本自己进 Alpine 容器，装好工具再编；本来就在 Alpine 上就直接编），
+macOS 用 Xcode 命令行工具，Windows 版在 Linux 上装 `gcc-mingw-w64-x86-64`。
 
 ```sh
 ./scripts/build-linux-arm64.sh        # 平台对应的入口，一个平台一个
 ./scripts/smoke.sh out/ffmpeg-linux-arm64
 ```
 
-脚本下载 `versions.env` 里的源码包并核对 sha256，结果在 `out/`：二进制、`.sha256`、`.configure.txt`。
+脚本下载 `versions.env` 里的源码包并核对 sha256，结果在 `out/`：二进制、`.sha256`、`.configure.txt`（Linux 版末行另记 musl 版本和 Alpine 镜像）。
 想改 FFmpeg（比如加补丁或换版本），把改好的源码打成 `.tar.xz`，在 `versions.env` 里改 URL（本地文件可写 `file:///…`）和 sha256，删掉 `build/dl` 里的旧包后重编。
 
 替换 iCrew 里的 ffmpeg：用环境变量 `ICREW_FFMPEG=<你的 ffmpeg 的绝对路径>` 启动 iCrew 服务，
@@ -73,6 +75,6 @@ iCrew 把切换台的 PGM 经 mediamtx 发给手机。手机和浏览器的 WebR
 
 ## CI 和发版
 
-[.github/workflows/build.yml](.github/workflows/build.yml) 只用 GitHub 托管的 runner。PR 和手动触发时编五个平台、检查链接的库、
+[.github/workflows/build.yml](.github/workflows/build.yml) 只用 GitHub 托管的 runner，Actions 都固定到完整提交 SHA。PR 和手动触发时编五个平台、检查链接的库、
 跑冒烟测试（Windows 版在 Windows runner 上跑），产物作为 artifact 上传。推 `v*` tag 时再把上面列的文件放进同一个 Release；
 tag 带 `-`（如 `v1.0.0-beta.1`）的标为 prerelease。

@@ -4,7 +4,7 @@ set -euo pipefail
 case $1 in
   linux-*)
     file "$2"
-    file "$2" | grep -q "statically linked" ;;
+    file "$2" | grep -Eq "statically linked|static-pie linked" ;;
   darwin-*)
     otool -L "$2"
     ! otool -L "$2" | tail -n +2 | grep -vE '^[[:space:]]+/(usr/lib|System/Library)/' ;;
