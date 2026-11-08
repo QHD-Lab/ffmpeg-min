@@ -57,9 +57,10 @@ build() {
   tar -xJf "$DL/${FFMPEG_URL##*/}" -C "$work/src"
 
   echo "== libopus $OPUS_VERSION ($platform)"
+  # ${a[@]+"${a[@]}"}: macOS bash 3.2 treats an empty array as unset under set -u.
   (cd "$work/src/opus-$OPUS_VERSION" &&
     ./configure --prefix="$prefix" --enable-static --disable-shared \
-      --disable-doc --disable-extra-programs "${opus_args[@]}" &&
+      --disable-doc --disable-extra-programs ${opus_args[@]+"${opus_args[@]}"} &&
     make -j"$JOBS" && make install)
 
   echo "== FFmpeg $FFMPEG_VERSION ($platform)"
@@ -67,7 +68,7 @@ build() {
   (cd "$work/src/ffmpeg-$FFMPEG_VERSION" &&
     PKG_CONFIG_LIBDIR="$prefix/lib/pkgconfig" ./configure \
       --pkg-config=pkg-config --pkg-config-flags=--static \
-      "${FFMPEG_COMPONENTS[@]}" "${ff_args[@]}" &&
+      "${FFMPEG_COMPONENTS[@]}" ${ff_args[@]+"${ff_args[@]}"} &&
     make -j"$JOBS")
 
   local exe="" bin
