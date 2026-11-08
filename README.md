@@ -68,12 +68,13 @@ macOS 用 Xcode 命令行工具，Windows 版在 Linux 上装 `gcc-mingw-w64-x86
 
 ## 冒烟测试
 
-[scripts/smoke.sh](scripts/smoke.sh) 只用被测的这个二进制，不需要别的软件：
+[scripts/smoke.sh](scripts/smoke.sh) 只用被测的这个二进制（Windows 另要 node）：
 
 1. `-buildconf` 里没有 gpl、nonfree、version3，`-L` 是 LGPL 2.1；
 2. 编码器只有 libopus，需要的解码器、RTSP、协议都在；
 3. `auth_file` 选项在、缺文件和空文件会失败、只认 file 和 pipe；AC-3 和 MP2 样本转 Opus；
 4. 在 127.0.0.1 上跑一遍 iCrew 的实际链路：推 H.264+AAC 样本 → 一个 ffmpeg 收、视频 copy、音频转 Opus、再推出去 → 另一个 ffmpeg 收，检查是 H264 + Opus 48 kHz 立体声且帧数够。两个推流的 ffmpeg 都用 `-auth_file pipe:3` 从管道读口令，并检查日志里没有口令。
+   Windows 上 Git Bash 传不了 fd 3 给原生程序，这一步改由 [test/pipe3.mjs](test/pipe3.mjs) 用 Node 起 ffmpeg（和 iCrew 一样），所以 Windows 冒烟要有 node。
 
 样本在 `test/fixtures`，是用 [test/make-fixtures.sh](test/make-fixtures.sh) 生成的测试图案和正弦音。
 

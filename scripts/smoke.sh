@@ -4,6 +4,7 @@
 #   publish h264-aac.mp4 -> [listen, video copy, AAC -> libopus, publish] -> [listen, check H264 + Opus]
 set -euo pipefail
 FF=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
+TEST=$(cd "$(dirname "$0")/../test" && pwd)
 cd "$(dirname "$0")/../test/fixtures"
 TMP=$(mktemp -d)
 trap 'kill $(jobs -p) 2>/dev/null || true' EXIT
@@ -53,16 +54,23 @@ expect_auth_error "auth_file must hold" -i ac3.mp4 -c copy -auth_file "$TMP/empt
 echo "ok   auth_file: on rtsp demuxer and muxer; missing, empty and non-file/pipe sources fail"
 
 IN=rtsp://127.0.0.1:18554/pgm-in OUT=rtsp://127.0.0.1:18555/pgm-out
-# Both publishers get their credential the way iCrew passes it: on an inherited pipe, fd 3.
+# Both publishers get their credential the way iCrew passes it: on an inherited pipe, fd 3
+# (on Windows through test/pipe3.mjs, i.e. Node's spawn, which is what iCrew uses).
 # (Listen mode does not check it; this proves it is read without breaking the stream.)
 SECRET=icrew-ffmpeg:smoke-$$-secret
+ff3() {
+  case $(uname -s) in
+    MINGW*|MSYS*|CYGWIN*) SMOKE_SECRET=$SECRET node "$TEST/pipe3.mjs" "$FF" -hide_banner -nostdin "$@" ;;
+    *) ff "$@" 3< <(echo "$SECRET") ;;
+  esac
+}
 ff -rtsp_flags listen -listen_timeout 30 -i $OUT -c copy -f null - > "$TMP/view.log" 2>&1 & view=$!
 sleep 2
-ff -rtsp_flags listen -listen_timeout 30 -i $IN -map 0:v:0 -map 0:a:0 -c:v copy \
+ff3 -rtsp_flags listen -listen_timeout 30 -i $IN -map 0:v:0 -map 0:a:0 -c:v copy \
   -c:a libopus -ar 48000 -ac 2 -b:a 96k -application lowdelay -frame_duration 20 \
-  -rtsp_transport tcp -auth_file pipe:3 -f rtsp $OUT > "$TMP/bridge.log" 2>&1 3< <(echo "$SECRET") & bridge=$!
+  -rtsp_transport tcp -auth_file pipe:3 -f rtsp $OUT > "$TMP/bridge.log" 2>&1 & bridge=$!
 sleep 2
-ff -re -i h264-aac.mp4 -c copy -rtsp_transport tcp -auth_file pipe:3 -f rtsp $IN > "$TMP/pub.log" 2>&1 3< <(echo "$SECRET") \
+ff3 -re -i h264-aac.mp4 -c copy -rtsp_transport tcp -auth_file pipe:3 -f rtsp $IN > "$TMP/pub.log" 2>&1 \
   || { cat "$TMP/pub.log"; fail "publish"; }
 wait $bridge || { cat "$TMP/bridge.log"; fail "bridge exited with an error"; }
 wait $view || { cat "$TMP/view.log"; fail "viewer exited with an error"; }
