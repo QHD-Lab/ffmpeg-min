@@ -1,0 +1,4 @@
+# Windows runners check out with autocrlf; bash needs LF.
+*.sh text eol=lf
+*.env text eol=lf
+*.mp4 binary
