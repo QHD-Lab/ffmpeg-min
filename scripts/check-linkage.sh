@@ -4,7 +4,9 @@ set -euo pipefail
 case $1 in
   linux-*)
     file "$2"
-    file "$2" | grep -Eq "statically linked|static-pie linked" ;;
+    file "$2" | grep -Eq "statically linked|static-pie linked"
+    # glibc is LGPL and must not be linked in (see README); musl is the libc.
+    ! LC_ALL=C grep -aqE 'GLIBC_|GNU C Library' "$2" ;;
   darwin-*)
     otool -L "$2"
     ! otool -L "$2" | tail -n +2 | grep -vE '^[[:space:]]+/(usr/lib|System/Library)/' ;;

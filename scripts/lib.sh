@@ -77,9 +77,10 @@ build() {
   cp "$work/src/ffmpeg-$FFMPEG_VERSION/ffmpeg$exe" "$OUT/$bin"
   (cd "$OUT" && echo "$(sha256 "$bin")  $bin" > "$bin.sha256")
   sed -n 's/^FFMPEG_CONFIGURATION=//p' "$work/src/ffmpeg-$FFMPEG_VERSION/ffbuild/config.mak" > "$OUT/ffmpeg-$platform.configure.txt"
-  if is_musl; then
-    echo "# libc: $(/lib/ld-musl-*.so.1 2>&1 | sed -n '1p;2p' | tr '\n' ' '), $ALPINE_IMAGE" >> "$OUT/ffmpeg-$platform.configure.txt"
-  fi
+  case $platform in linux-*)
+    "$ROOT/scripts/check-linkage.sh" "$platform" "$OUT/$bin"
+    echo "# libc: $(/lib/ld-musl-*.so.1 2>&1 | sed -n '1p;2p' | tr '\n' ' '), $ALPINE_IMAGE" >> "$OUT/ffmpeg-$platform.configure.txt" ;;
+  esac
   echo "== built $OUT/$bin ($(wc -c < "$OUT/$bin" | tr -d ' ') bytes)"
 }
 
@@ -92,7 +93,9 @@ require_host() {
   echo "this script must run on $os $* (got $(uname -s) $(uname -m))" >&2; exit 1
 }
 
-is_musl() { ls /lib/ld-musl-*.so.1 >/dev/null 2>&1; }
+# True only if the compiler itself targets musl; a musl package on a glibc
+# distro adds /lib/ld-musl-* but leaves cc linking glibc.
+is_musl() { cc -dumpmachine 2>/dev/null | grep -q -- '-musl'; }
 
 # in_alpine <script>: unless already on musl, re-runs <script> inside the pinned
 # Alpine container (needs docker) and exits with its status.
@@ -100,7 +103,7 @@ in_alpine() {
   is_musl && return 0
   local uid gid; uid=$(id -u); gid=$(id -g)
   docker run --rm -v "$ROOT:/src" -w /src -e JOBS "$ALPINE_IMAGE" sh -c "
-    apk add --no-cache bash build-base curl linux-headers pkgconf xz >/dev/null &&
+    apk add --no-cache bash build-base curl file linux-headers pkgconf xz >/dev/null &&
     bash scripts/$(basename "$1"); s=\$?; chown -R $uid:$gid build out; exit \$s"
   exit $?
 }
