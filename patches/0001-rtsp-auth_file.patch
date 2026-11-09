@@ -1,0 +1,115 @@
+ffmpeg-min patch 0001, 2026-11-09: RTSP option auth_file
+
+Adds the RTSP muxer/demuxer option -auth_file <file|pipe:N>. The RTSP
+user:password is read from that private file or inherited pipe instead of
+the URL, so the credential never appears in the command line that other
+local users can list (ps, /proc/<pid>/cmdline). Only the file and pipe
+protocols may be opened, and the source is read to EOF (a pipe's writer must
+close it). It must hold one line of 1 to 127 bytes; one trailing LF or CRLF
+is stripped. Empty, over-long, or multi-line content, or a NUL byte, is an
+error. It is read once per connect, before the redirect loop, so
+cross-origin redirects still drop the credential as upstream does. A
+user:password in the URL, if any, still takes precedence.
+
+The credential is never logged: the -loglevel trace dump of each sent RTSP
+request shows "Authorization: <redacted>" instead of the header upstream
+prints, whatever the credential's source (Basic is reversible Base64).
+
+Applies to FFmpeg 9.0.2 with: patch -p1
+Changed files: libavformat/rtsp.c, libavformat/rtsp.h (LGPL 2.1 section 2a:
+both carry a dated notice next to each change).
+
+--- a/libavformat/rtsp.h
++++ b/libavformat/rtsp.h
+@@ -437,6 +437,10 @@
+      */
+     char *user_agent;
+ 
++    /** ffmpeg-min 2026-11-09: "user:password" read from this file or pipe:N
++     *  (option auth_file) instead of the URL, so it never shows in the command line */
++    char *auth_file;
++
+     char default_lang[4];
+     int buffer_size;
+     int pkt_size;
+--- a/libavformat/rtsp.c
++++ b/libavformat/rtsp.c
+@@ -104,6 +104,7 @@
+     { "timeout", "set timeout (in microseconds) of socket I/O operations", OFFSET(stimeout), AV_OPT_TYPE_INT64, {.i64 = 0}, INT_MIN, INT64_MAX, DEC },
+     COMMON_OPTS(),
+     { "user_agent", "override User-Agent header", OFFSET(user_agent), AV_OPT_TYPE_STRING, {.str = LIBAVFORMAT_IDENT}, 0, 0, DEC },
++    { "auth_file", "read the RTSP user:password from this file or pipe:N instead of the URL", OFFSET(auth_file), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, DEC|ENC },
+ 
+     // TLS options
+     FF_TLS_CLIENT_OPTIONS(RTSPState, tls_opts),
+@@ -1450,6 +1451,7 @@
+     RTSPState *rt = s->priv_data;
+     char buf[MAX_URL_SIZE], *out_buf;
+     char base64buf[AV_BASE64_SIZE(sizeof(buf))];
++    size_t auth_start = 0, auth_end = 0;
+ 
+     if (!rt->rtsp_hd_out)
+         return AVERROR(ENOTCONN);
+@@ -1469,8 +1471,10 @@
+     if (rt->auth[0]) {
+         char *str = ff_http_auth_create_response(&rt->auth_state,
+                                                  rt->auth, url, method);
++        auth_start = strlen(buf);
+         if (str)
+             av_strlcat(buf, str, sizeof(buf));
++        auth_end = strlen(buf);
+         av_free(str);
+     }
+     if (send_content_length > 0 && send_content)
+@@ -1483,7 +1487,12 @@
+         out_buf = base64buf;
+     }
+ 
+-    av_log(s, AV_LOG_TRACE, "Sending:\n%s--\n", buf);
++    /* ffmpeg-min 2026-11-09: never log the Authorization header, Basic is reversible */
++    if (auth_end > auth_start)
++        av_log(s, AV_LOG_TRACE, "Sending:\n%.*sAuthorization: <redacted>\r\n%s--\n",
++               (int)auth_start, buf, buf + auth_end);
++    else
++        av_log(s, AV_LOG_TRACE, "Sending:\n%s--\n", buf);
+ 
+     ffurl_write(rt->rtsp_hd_out, out_buf, strlen(out_buf));
+     if (send_content_length > 0 && send_content) {
+@@ -1917,6 +1926,37 @@
+         return AVERROR(EINVAL);
+     }
+ 
++    if (rt->auth_file) {
++        /* ffmpeg-min 2026-11-09: the credential comes from a private file or an
++         * inherited pipe, never from the URL, so it is not in the command line.
++         * Read once, before the redirect loop: a pipe cannot be read twice, and a
++         * cross-origin redirect must keep clearing rt->auth. */
++        AVIOContext *pb = NULL;
++        char cred[sizeof(rt->auth) + 2]; /* longest valid: 127 bytes + CRLF */
++        int got, n;
++        err = ffio_open_whitelist(&pb, rt->auth_file, AVIO_FLAG_READ,
++                                  &s->interrupt_callback, NULL, "file,pipe", NULL);
++        if (err < 0) {
++            av_log(s, AV_LOG_ERROR, "Could not open auth_file\n");
++            return err;
++        }
++        /* avio_read only returns short at EOF, so a full buffer means too long */
++        got = n = avio_read(pb, (unsigned char *)cred, sizeof(cred));
++        if (n >= 0 && pb->error < 0)
++            n = pb->error;
++        avio_closep(&pb);
++        while (n > 0 && (cred[n - 1] == '\n' || cred[n - 1] == '\r'))
++            n--;
++        if (n <= 0 || got == sizeof(cred) || n >= (int)sizeof(rt->auth) ||
++            memchr(cred, '\n', n) || memchr(cred, '\r', n) || memchr(cred, '\0', n)) {
++            av_log(s, AV_LOG_ERROR, "auth_file must hold one line user:password, 1 to %d bytes\n",
++                   (int)sizeof(rt->auth) - 1);
++            return n < 0 ? n : AVERROR(EINVAL);
++        }
++        memcpy(rt->auth, cred, n);
++        rt->auth[n] = '\0';
++    }
++
+     if (!ff_network_init())
+         return AVERROR(EIO);
+ 

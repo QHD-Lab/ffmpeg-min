@@ -1,0 +1,96 @@
+name: build
+
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: build ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux-amd64, os: ubuntu-24.04 }
+          - { platform: linux-arm64, os: ubuntu-24.04-arm }
+          - { platform: darwin-amd64, os: macos-15-intel }
+          - { platform: darwin-arm64, os: macos-15 }
+          - { platform: windows-amd64, os: ubuntu-24.04 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install mingw-w64
+        if: matrix.platform == 'windows-amd64'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64
+      - name: Install pkg-config
+        if: runner.os == 'macOS'
+        run: command -v pkg-config || brew install pkgconf
+      - name: Build
+        run: ./scripts/build-${{ matrix.platform }}.sh
+      - name: Check linked libraries
+        run: ./scripts/check-linkage.sh ${{ matrix.platform }} out/ffmpeg-${{ matrix.platform }}${{ matrix.platform == 'windows-amd64' && '.exe' || '' }}
+      - name: Smoke test
+        # The Windows binary is tested on a Windows runner in the next job.
+        if: matrix.platform != 'windows-amd64'
+        run: ./scripts/smoke.sh out/ffmpeg-${{ matrix.platform }}
+      - name: Size
+        run: ls -l out/
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ffmpeg-${{ matrix.platform }}
+          path: out/
+          if-no-files-found: error
+
+  smoke-windows:
+    needs: build
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ffmpeg-windows-amd64
+          path: out
+      - name: Smoke test
+        shell: bash
+        run: ./scripts/smoke.sh out/ffmpeg-windows-amd64.exe
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, smoke-windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: ffmpeg-*
+          path: out
+          merge-multiple: true
+      - name: Assemble release assets
+        run: ./scripts/release-assets.sh "$GITHUB_REF_NAME"
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          . versions.env
+          prerelease=""
+          case $GITHUB_REF_NAME in *-*) prerelease=--prerelease ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* -R "$GITHUB_REPOSITORY" --verify-tag $prerelease \
+            --title "$GITHUB_REF_NAME (FFmpeg $FFMPEG_VERSION, libopus $OPUS_VERSION)" \
+            --notes "Minimal LGPL-2.1 FFmpeg $FFMPEG_VERSION builds with libopus $OPUS_VERSION, built from the source tarballs attached here by the scripts in ffmpeg-min-$GITHUB_REF_NAME-build-scripts.tar.gz. One patch, 0001-rtsp-auth_file.patch (attached; adds the RTSP option auth_file so the credential stays off the command line). Per-platform configure lines are in ffmpeg-<platform>.configure.txt. See README for how to rebuild and replace the binary."
