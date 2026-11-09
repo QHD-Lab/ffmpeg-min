@@ -26,7 +26,8 @@ iCrew 把切换台的 PGM 经 mediamtx 发给手机。手机和浏览器的 WebR
 源码版本和 sha256 钉在 [versions.env](versions.env)：FFmpeg 9.0.2、libopus 1.6.1，都用官方源码包。FFmpeg 打一个补丁，libopus 不改：
 
 - [patches/0001-rtsp-auth_file.patch](patches/0001-rtsp-auth_file.patch)：给 RTSP 收发加选项 `-auth_file <文件|pipe:N>`，从私密文件或继承的管道读 `user:password`。
-  这样本机 RTSP 的口令不用写进命令行，本机其他用户用 `ps` 看不到。只能打开 file 和 pipe；文件缺失、为空或超过 127 字节都会报错退出；口令不进日志。
+  这样本机 RTSP 的口令不用写进命令行，本机其他用户用 `ps` 看不到。只能打开 file 和 pipe，读到结尾为止（管道写完要关掉）；内容必须是一行、1 到 127 字节，结尾的一个换行会去掉；缺失、为空、超长、多行都会报错退出。
+  口令不进日志：`-loglevel trace` 打印发出的 RTSP 请求时，`Authorization` 头一律显示为 `<redacted>`（Basic 是可逆的 Base64）。
   改动的 `libavformat/rtsp.c`、`rtsp.h` 都在改动处带了注明日期的修改说明（LGPL 2.1 第 2 条）。`ffmpeg -version` 显示 `9.0.2-icrew.1`。
 
 | 平台 | 构建方式 | 链接 |
@@ -68,11 +69,13 @@ macOS 用 Xcode 命令行工具，Windows 版在 Linux 上装 `gcc-mingw-w64-x86
 
 ## 冒烟测试
 
-[scripts/smoke.sh](scripts/smoke.sh) 只用被测的这个二进制（Windows 另要 node）：
+[scripts/smoke.sh](scripts/smoke.sh) 除了被测的这个二进制，只要 node（GitHub 托管 runner 自带）：
 
 1. `-buildconf` 里没有 gpl、nonfree、version3，`-L` 是 LGPL 2.1；
 2. 编码器只有 libopus，需要的解码器、RTSP、协议都在；
-3. `auth_file` 选项在、缺文件和空文件会失败、只认 file 和 pipe；AC-3 和 MP2 样本转 Opus；
+3. AC-3 和 MP2 样本转 Opus；`auth_file` 选项在，缺失、非 file/pipe、空、只有换行、128 字节、127 字节加换行再接尾巴、两行都会失败；
+   再对 [test/rtsp401.mjs](test/rtsp401.mjs)（一律回 401 Basic 的假 RTSP 服务）开 `-loglevel trace` 收发各连一次：服务端要收到完整的口令（管道来的和 127 字节文件来的），
+   日志里口令的明文和 Base64 都不能出现，`Authorization` 显示为 `<redacted>`；
 4. 在 127.0.0.1 上跑一遍 iCrew 的实际链路：推 H.264+AAC 样本 → 一个 ffmpeg 收、视频 copy、音频转 Opus、再推出去 → 另一个 ffmpeg 收，检查是 H264 + Opus 48 kHz 立体声且帧数够。两个推流的 ffmpeg 都用 `-auth_file pipe:3` 从管道读口令，并检查日志里没有口令。
    Windows 上 Git Bash 传不了 fd 3 给原生程序，这一步改由 [test/pipe3.mjs](test/pipe3.mjs) 用 Node 起 ffmpeg（和 iCrew 一样），所以 Windows 冒烟要有 node。
 
